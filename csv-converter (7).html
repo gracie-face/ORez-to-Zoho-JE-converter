@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSV Converter - Rental to Journal Entry</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .upload-area {
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            margin-bottom: 20px;
+            transition: border-color 0.3s;
+        }
+        .upload-area:hover {
+            border-color: #007bff;
+        }
+        .upload-area.dragover {
+            border-color: #007bff;
+            background-color: #f8f9fa;
+        }
+        input[type="file"] {
+            display: none;
+        }
+        .upload-btn {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        .upload-btn:hover {
+            background-color: #0056b3;
+        }
+        .status {
+            margin: 20px 0;
+            padding: 10px;
+            border-radius: 4px;
+            display: none;
+        }
+        .status.success {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .status.error {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        .download-area {
+            text-align: center;
+            margin-top: 20px;
+        }
+        .download-btn {
+            background-color: #28a745;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .download-btn:hover {
+            background-color: #218838;
+        }
+        .preview {
+            margin-top: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f8f9fa;
+            position: sticky;
+            top: 0;
+        }
+        .instructions {
+            background-color: #e9ecef;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        .instructions h3 {
+            margin-top: 0;
+            color: #495057;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Rental Reservation to Journal Entry CSV Converter</h1>
+        
+        <div class="instructions">
+            <h3>Instructions:</h3>
+            <p>1. Upload your rental reservation CSV file using the upload area below</p>
+            <p>2. The converter will automatically map your data to journal entry format</p>
+            <p>3. Review the preview and download the converted CSV file</p>
+            <p>4. Import the downloaded file into your accounting software</p>
+        </div>
+
+        <div class="upload-area" id="uploadArea">
+            <p>Drop your CSV file here or click to browse</p>
+            <button class="upload-btn" onclick="document.getElementById('fileInput').click()">Choose File</button>
+            <input type="file" id="fileInput" accept=".csv" />
+        </div>
+
+        <div class="status" id="status"></div>
+
+        <div class="download-area" id="downloadArea" style="display: none;">
+            <a class="download-btn" id="downloadBtn" download="journal_entries.csv">Download Journal Entry CSV</a>
+        </div>
+
+        <div class="preview" id="preview" style="display: none;">
+            <table id="previewTable"></table>
+        </div>
+    </div>
+
+    <script>
+        let convertedData = null;
+        
+        // File upload handling
+        const fileInput = document.getElementById('fileInput');
+        const uploadArea = document.getElementById('uploadArea');
+        const status = document.getElementById('status');
+        const downloadArea = document.getElementById('downloadArea');
+        const preview = document.getElementById('preview');
+        const previewTable = document.getElementById('previewTable');
+        const downloadBtn = document.getElementById('downloadBtn');
+
+        // Drag and drop functionality
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFile(files[0]);
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFile(e.target.files[0]);
+            }
+        });
+
+        function showStatus(message, type) {
+            status.textContent = message;
+            status.className = `status ${type}`;
+            status.style.display = 'block';
+        }
+
+        function handleFile(file) {
+            if (!file.name.endsWith('.csv')) {
+                showStatus('Please select a CSV file.', 'error');
+                return;
+            }
+
+            showStatus('Processing file...', 'success');
+            
+            Papa.parse(file, {
+                header: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    if (results.errors.length > 0) {
+                        showStatus('Error parsing CSV: ' + results.errors[0].message, 'error');
+                        return;
+                    }
+                    
+                    try {
+                        convertData(results.data);
+                        showStatus('File converted successfully!', 'success');
+                    } catch (error) {
+                        showStatus('Error converting data: ' + error.message, 'error');
+                    }
+                },
+                error: function(error) {
+                    showStatus('Error reading file: ' + error.message, 'error');
+                }
+            });
+        }
+
+        function convertData(inputData) {
+            const journalEntries = [];
+            let journalNumberSuffix = 1;
+            
+            // Group by booking number to assign same journal suffix
+            const bookingGroups = {};
+            inputData.forEach(row => {
+                const bookingNum = row['Booking #'];
+                if (!bookingGroups[bookingNum]) {
+                    bookingGroups[bookingNum] = journalNumberSuffix++;
+                }
+            });
+
+            function parseAmount(value) {
+                if (!value || value === '' || value === '0' || value === '0.00') return 0;
+                
+                // Remove commas and dollar signs
+                let cleanValue = value.toString().replace(/[,$]/g, '');
+                
+                // Handle accounting format with parentheses (12.90) = negative
+                if (cleanValue.includes('(') && cleanValue.includes(')')) {
+                    cleanValue = cleanValue.replace(/[()]/g, '');
+                    return parseFloat(cleanValue) || 0; // Return as positive since it's a discount
+                }
+                
+                // Parse the number (could be negative like -12.90)
+                let numValue = parseFloat(cleanValue) || 0;
+                
+                // For discount amounts, convert negative to positive since we want debits
+                return Math.abs(numValue);
+            }
+
+            inputData.forEach(row => {
+                const bookingNum = row['Booking #'];
+                const departure = row['Departure'];
+                const suffix = bookingGroups[bookingNum];
+                
+                let totalCredits = 0;
+
+                // 1. CLEANING FEE - CREDIT
+                const cleaning = parseAmount(row['Cleaning']);
+                if (cleaning > 0) {
+                    journalEntries.push({
+                        'Journal Date': departure,
+                        'Reference Number': bookingNum,
+                        'Journal Number Prefix': 'OR-',
+                        'Journal Number Suffix': suffix,
+                        'Notes': bookingNum,
+                        'Journal Type': 'both',
+                        'Currency': 'USD',
+                        'Account': 'Cleaning Fee Income',
+                        'Description': 'Cleaning Fee',
+                        'Contact Name': '',
+                        'Debit': '',
+                        'Credit': cleaning.toFixed(2),
+                        'Tax Name': '',
+                        'Tax Type': '',
+                        'Tax Percentage': '',
+                        'Exemption Code': '',
+                        'Tax Authority': '',
+                        'Item Tax Exemption Reason': '',
+                        'Project Name': '',
+                        'Status': 'published',
+                        'Exchange Rate': ''
+                    });
+                    totalCredits += cleaning;
+                }
+
+                // 2. OTHER CHARGES (Pet + Early Check-In) - CREDIT
+                const pet = parseAmount(row['Pet']);
+                const earlyCheckIn = parseAmount(row['Early Check-In Fee']);
+                const totalOtherCharges = pet + earlyCheckIn;
+                if (totalOtherCharges > 0) {
+                    journalEntries.push({
+                        'Journal Date': departure,
+                        'Reference Number': '',
+                        'Journal Number Prefix': 'OR-',
+                        'Journal Number Suffix': suffix,
+                        'Notes': bookingNum,
+                        'Journal Type': 'both',
+                        'Currency': 'USD',
+                        'Account': 'Other Charges',
+                        'Description': 'Pet & Early Check-In Fees',
+                        'Contact Name': '',
+                        'Debit': '',
+                        'Credit': totalOtherCharges.toFixed(2),
+                        'Tax Name': '',
+                        'Tax Type': '',
+                        'Tax Percentage': '',
+                        'Exemption Code': '',
+                        'Tax Authority': '',
+                        'Item Tax Exemption Reason': '',
+                        'Project Name': '',
+                        'Status': 'draft',
+                        'Exchange Rate': ''
+                    });
+                    totalCredits += totalOtherCharges;
+                }
+
+                // 3. HOOD RIVER TAX - CREDIT
+                const hoodRiverTax = parseAmount(row['Hood River City Tax']);
+                if (hoodRiverTax > 0) {
+                    journalEntries.push({
+                        'Journal Date': departure,
+                        'Reference Number': '',
+                        'Journal Number Prefix': 'OR-',
+                        'Journal Number Suffix': suffix,
+                        'Notes': bookingNum,
+                        'Journal Type': 'both',
+                        'Currency': 'USD',
+                        'Account': 'Hood River Tax Income',
+                        'Description': 'Hood River City Tax',
+                        'Contact Name': '',
+                        'Debit': '',
+                        'Credit': hoodRiverTax.toFixed(2),
+                        'Tax Name': '',
+                        'Tax Type': '',
+                        'Tax Percentage': '',
+                        'Exemption Code': '',
+                        'Tax Authority': '',
+                        'Item Tax Exemption Reason': '',
+                        'Project Name': '',
+                        'Status': 'draft',
+                        'Exchange Rate': ''
+                    });
+                    totalCredits += hoodRiverTax;
+                }
+
+                // 4. RENT - CREDIT (FIXED!)
+                const rentAmount = parseAmount(row['Rent']);
+                if (rentAmount > 0) {
+                    const property = row['Property'] || '';
+                    let rentAccount = 'Rental Income'; // default
+                    if (property === '2034 Eugene Hood River') {
+                        rentAccount = '2034 Eugene Hood River';
+                    } else if (property === 'Timber Moon') {
+                        rentAccount = 'Timber Moon';
+                    }
+                    
+                    journalEntries.push({
+                        'Journal Date': departure,
+                        'Reference Number': '',
+                        'Journal Number Prefix': 'OR-',
+                        'Journal Number Suffix': suffix,
+                        'Notes': bookingNum,
+                        'Journal Type': 'both',
+                        'Currency': 'USD',
+                        'Account': rentAccount,
+                        'Description': 'Rent',
+                        'Contact Name': '',
+                        'Debit': '',
+                        'Credit': rentAmount.toFixed(2),
+                        'Tax Name': '',
+                        'Tax Type': '',
+                        'Tax Percentage': '',
+                        'Exemption Code': '',
+                        'Tax Authority': '',
+                        'Item Tax Exemption Reason': '',
+                        'Project Name': '',
+                        'Status': 'draft',
+                        'Exchange Rate': ''
+                    });
+                    totalCredits += rentAmount;
+                }
+
+                // DEBIT ENTRIES
+                let totalDebits = 0;
+
+                // 5. LAST MINUTE DISCOUNTS (sum of 3 discount columns) - DEBIT
+                const discount1 = parseAmount(row['Last Minute Discount - Summer - 12 Days 7%']);
+                const discount2 = parseAmount(row['Last Minute Discount Summer 5% <5 days']);
+                const discount3 = parseAmount(row['Last-minute discount']);
+                const totalLastMinuteDiscount = discount1 + discount2 + discount3;
+                
+                if (totalLastMinuteDiscount > 0) {
+                    journalEntries.push({
+                        'Journal Date': departure,
+                        'Reference Number': '',
+                        'Journal Number Prefix': 'OR-',
+                        'Journal Number Suffix': suffix,
+                        'Notes': bookingNum,
+                        'Journal Type': 'both',
+                        'Currency': 'USD',
+                        'Account': 'Last Minute Discounts',
+                        'Description': 'Last Minute Discounts',
+                        'Contact Name': '',
+                        'Debit': totalLastMinuteDiscount.toFixed(2),
+                        'Credit': '',
+                        'Tax Name': '',
+                        'Tax Type': '',
+                        'Tax Percentage': '',
+                        'Exemption Code': '',
+                        'Tax Authority': '',
+                        'Item Tax Exemption Reason': '',
+                        'Project Name': '',
+                        'Status': 'published',
+                        'Exchange Rate': ''
+                    });
+                    totalDebits += totalLastMinuteDiscount;
+                }
+
+                // 6. DISCOUNT FOR TROUBLES - DEBIT
+                const troubleDiscount = parseAmount(row['Discount for troubles']);
+                
+                if (troubleDiscount > 0) {
+                    journalEntries.push({
+                        'Journal Date': departure,
+                        'Reference Number': '',
+                        'Journal Number Prefix': 'OR-',
+                        'Journal Number Suffix': suffix,
+                        'Notes': bookingNum,
+                        'Journal Type': 'both',
+                        'Currency': 'USD',
+                        'Account': 'Discounts',
+                        'Description': 'Discount for troubles',
+                        'Contact Name': '',
+                        'Debit': troubleDiscount.toFixed(2),
+                        'Credit': '',
+                        'Tax Name': '',
+                        'Tax Type': '',
+                        'Tax Percentage': '',
+                        'Exemption Code': '',
+                        'Tax Authority': '',
+                        'Item Tax Exemption Reason': '',
+                        'Project Name': '',
+                        'Status': 'published',
+                        'Exchange Rate': ''
+                    });
+                    totalDebits += troubleDiscount;
+                }
+
+                // 7. PLATFORM FEES - DEBIT
+                const channel = parseAmount(row['Channel']);
+                if (channel > 0) {
+                    journalEntries.push({
+                        'Journal Date': departure,
+                        'Reference Number': '',
+                        'Journal Number Prefix': 'OR-',
+                        'Journal Number Suffix': suffix,
+                        'Notes': bookingNum,
+                        'Journal Type': 'both',
+                        'Currency': 'USD',
+                        'Account': 'Platform Fees',
+                        'Description': 'Platform Fees',
+                        'Contact Name': '',
+                        'Debit': channel.toFixed(2),
+                        'Credit': '',
+                        'Tax Name': '',
+                        'Tax Type': '',
+                        'Tax Percentage': '',
+                        'Exemption Code': '',
+                        'Tax Authority': '',
+                        'Item Tax Exemption Reason': '',
+                        'Project Name': '',
+                        'Status': 'draft',
+                        'Exchange Rate': ''
+                    });
+                    totalDebits += channel;
+                }
+
+                // 8. CREDIT CARD PROCESSING - DEBIT
+                const ccProcessing = parseAmount(row['CreditCardProcessing']);
+                if (ccProcessing > 0) {
+                    journalEntries.push({
+                        'Journal Date': departure,
+                        'Reference Number': '',
+                        'Journal Number Prefix': 'OR-',
+                        'Journal Number Suffix': suffix,
+                        'Notes': bookingNum,
+                        'Journal Type': 'both',
+                        'Currency': 'USD',
+                        'Account': 'Credit Card Processing Fees',
+                        'Description': 'Credit Card Processing',
+                        'Contact Name': '',
+                        'Debit': ccProcessing.toFixed(2),
+                        'Credit': '',
+                        'Tax Name': '',
+                        'Tax Type': '',
+                        'Tax Percentage': '',
+                        'Exemption Code': '',
+                        'Tax Authority': '',
+                        'Item Tax Exemption Reason': '',
+                        'Project Name': '',
+                        'Status': 'draft',
+                        'Exchange Rate': ''
+                    });
+                    totalDebits += ccProcessing;
+                }
+
+                // 9. BALANCING ENTRY - PNWFCU BUSINESS CHECKING - DEBIT
+                const remainingDebit = totalCredits - totalDebits;
+                if (remainingDebit > 0) {
+                    journalEntries.push({
+                        'Journal Date': departure,
+                        'Reference Number': '',
+                        'Journal Number Prefix': 'OR-',
+                        'Journal Number Suffix': suffix,
+                        'Notes': bookingNum,
+                        'Journal Type': 'both',
+                        'Currency': 'USD',
+                        'Account': 'PNWFCU BUSINESS CHECKING',
+                        'Description': 'Bank Deposit',
+                        'Contact Name': '',
+                        'Debit': remainingDebit.toFixed(2),
+                        'Credit': '',
+                        'Tax Name': '',
+                        'Tax Type': '',
+                        'Tax Percentage': '',
+                        'Exemption Code': '',
+                        'Tax Authority': '',
+                        'Item Tax Exemption Reason': '',
+                        'Project Name': '',
+                        'Status': 'draft',
+                        'Exchange Rate': ''
+                    });
+                }
+            });
+
+            convertedData = journalEntries;
+            showPreview(journalEntries);
+            setupDownload(journalEntries);
+        }
+
+        function showPreview(data) {
+            if (data.length === 0) return;
+            
+            const headers = Object.keys(data[0]);
+            let tableHtml = '<thead><tr>';
+            headers.forEach(header => {
+                tableHtml += `<th>${header}</th>`;
+            });
+            tableHtml += '</tr></thead><tbody>';
+            
+            data.slice(0, 20).forEach(row => { // Show first 20 rows
+                tableHtml += '<tr>';
+                headers.forEach(header => {
+                    tableHtml += `<td>${row[header] || ''}</td>`;
+                });
+                tableHtml += '</tr>';
+            });
+            tableHtml += '</tbody>';
+            
+            previewTable.innerHTML = tableHtml;
+            preview.style.display = 'block';
+        }
+
+        function setupDownload(data) {
+            const csv = Papa.unparse(data);
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            
+            downloadBtn.href = url;
+            downloadArea.style.display = 'block';
+        }
+    </script>
+</body>
+</html>
